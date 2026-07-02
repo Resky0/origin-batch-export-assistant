@@ -1,0 +1,10 @@
+.venv-build/
+build/
+release/
+outputs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+Thumbs.db
+.DS_Store
