@@ -15,7 +15,7 @@ import time
 import uuid
 import webbrowser
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from http import HTTPStatus
@@ -130,7 +130,6 @@ class ProjectExportResult:
 class ExportJob:
     output_directory: Path
     images_directory: Path
-    origin_logs_directory: Path
     origin: OriginInstallationInfo
     projects: list[str]
     results: list[ProjectExportResult]
@@ -535,30 +534,6 @@ def build_origin_command_line(
     return f'"{executable}" {switches} -RS {script}'
 
 
-class BatchLogger:
-    def __init__(self, path: Path) -> None:
-        self.path = Path(path)
-        self._lock = threading.Lock()
-
-    def write(
-        self,
-        level: str,
-        stage: str,
-        message: str,
-        *,
-        project_index: int = 0,
-    ) -> None:
-        timestamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-        line = (
-            f"{timestamp}\t{level.upper()}\tproject={project_index}\t"
-            f"stage={stage}\t{message}\n"
-        )
-        with self._lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(line)
-
-
 def _copy_exported_image(source: Path, target: Path) -> Path:
     candidate = target
     suffix = 2
@@ -593,7 +568,6 @@ class OriginBatchExporter:
         self._process_lock = threading.Lock()
         self._active_process: subprocess.Popen[bytes] | None = None
         self.installation: OriginInstallationInfo | None = None
-        self._logger: BatchLogger | None = None
 
     def cancel(self) -> None:
         self.cancel_event.set()
@@ -618,10 +592,8 @@ class OriginBatchExporter:
         validate_origin_projects(self.installation, normalized_projects)
 
         output_directory = Path(output_root)
-        images_directory = output_directory / "image"
+        images_directory = output_directory
         images_directory.mkdir(parents=True, exist_ok=True)
-        origin_logs_directory = output_directory / "origin-logs"
-        origin_logs_directory.mkdir(exist_ok=True)
         results = [
             ProjectExportResult(project_index=index, source_path=str(source))
             for index, source in enumerate(normalized_projects, start=1)
@@ -629,18 +601,10 @@ class OriginBatchExporter:
         job = ExportJob(
             output_directory=output_directory,
             images_directory=images_directory,
-            origin_logs_directory=origin_logs_directory,
             origin=self.installation,
             projects=[str(project) for project in normalized_projects],
             results=results,
         )
-        self._logger = BatchLogger(output_directory / "export.log")
-        self._logger.write(
-            "info",
-            ExportStage.PREFLIGHT.value,
-            f"开始批量导出，共 {len(results)} 个项目，Origin={self.installation.marketing_version}",
-        )
-        write_export_report(job)
         return self._run_job(job, results, progress=progress)
 
     def resume(
@@ -670,10 +634,8 @@ class OriginBatchExporter:
             raise RuntimeError("检测到 Origin 正在运行。请先保存工作并关闭 Origin。")
         validate_origin_projects(job.origin, [Path(result.source_path) for result in targets])
         self.installation = job.origin
-        self._logger = BatchLogger(job.output_directory / "export.log")
         self.cancel_event.clear()
         job.status = "running"
-        write_export_report(job)
         temp_root = Path(tempfile.mkdtemp(prefix="layout_origin_"))
         try:
             total = len(job.results)
@@ -686,7 +648,6 @@ class OriginBatchExporter:
                 target.error = None
                 target.error_code = None
                 target.graphs = []
-                write_export_report(job)
                 try:
                     result = self._export_one(
                         Path(target.source_path),
@@ -714,10 +675,8 @@ class OriginBatchExporter:
                         stage=ExportStage.COMPLETE,
                         status="failed",
                         message=result.error,
-                        level="error",
                     )
                 job.results[target.project_index - 1] = result
-                write_export_report(job)
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
         if self.cancel_event.is_set():
@@ -728,13 +687,6 @@ class OriginBatchExporter:
             job.status = "completed-with-errors"
         else:
             job.status = "success"
-        if self._logger:
-            self._logger.write(
-                "info",
-                ExportStage.COMPLETE.value,
-                f"任务结束，状态={job.status}，导出图片={len(job.graphs)}",
-            )
-        write_export_report(job)
         return job
 
     def _emit(
@@ -747,12 +699,7 @@ class OriginBatchExporter:
         stage: ExportStage,
         status: str,
         message: str,
-        level: str = "info",
     ) -> None:
-        if self._logger:
-            self._logger.write(
-                level, stage.value, message, project_index=project_index
-            )
         if progress:
             progress(
                 ExportProgress(
@@ -792,9 +739,6 @@ class OriginBatchExporter:
     ) -> ProjectExportResult:
         started = time.monotonic()
         total = len(job.results)
-        log_path = job.origin_logs_directory / (
-            f"{project_index:04d}_attempt_{attempt:02d}.log"
-        )
         origin_log_temp = temp_root / (
             f"origin_{project_index:04d}_attempt_{attempt:02d}.log"
         )
@@ -803,7 +747,6 @@ class OriginBatchExporter:
             source_path=str(source),
             status="running",
             attempt=attempt,
-            log_path=str(log_path),
         )
         try:
             result.source_sha256_before = sha256_file(source)
@@ -821,7 +764,6 @@ class OriginBatchExporter:
                 stage=ExportStage.PREFLIGHT,
                 status=result.status,
                 message=result.error,
-                level="error",
             )
             return result
 
@@ -913,11 +855,7 @@ class OriginBatchExporter:
                 self._active_process = None
 
         graphs: list[ExportedGraph] = []
-        try:
-            shutil.copy2(origin_log_temp, log_path)
-        except OSError:
-            log_path.touch(exist_ok=True)
-        log_text = _read_text_best_effort(log_path)
+        log_text = _read_text_best_effort(origin_log_temp)
         if ORIGIN_DONE_MARKER in log_text:
             result.last_stage = ExportStage.COMPLETE.value
         elif ORIGIN_EXPORTED_MARKER in log_text:
@@ -1007,7 +945,7 @@ class OriginBatchExporter:
                 f" 最后阶段：{result.last_stage}。请检查 Origin 许可证或隐藏弹窗后重试。"
             )
         elif error and error_code in {"ORIGIN_EXITED", "ORIGIN_START_FAILED"}:
-            error += f" 最后阶段：{result.last_stage}。请查看 {log_path.name}。"
+            error += f" 最后阶段：{result.last_stage}。"
         result.status = status
         result.graphs = graphs
         result.error = error
@@ -1030,7 +968,6 @@ class OriginBatchExporter:
                 if status == "success"
                 else f"导出未完成：{source.name}，{error or status}"
             ),
-            level="info" if status == "success" else "error",
         )
         return result
 
@@ -1138,29 +1075,6 @@ def create_figgrid(
         for image_path, asset_path in asset_files:
             archive.write(image_path, asset_path)
     return output_path
-
-
-def write_export_report(
-    job: ExportJob, selected: Sequence[ExportedGraph] | None = None
-) -> Path:
-    report_path = job.output_directory / "export-report.json"
-    if selected is not None:
-        job.selected_graph_ids = [graph.id for graph in selected]
-    payload = {
-        "reportVersion": REPORT_VERSION,
-        "appVersion": APP_VERSION,
-        "generatedAt": _iso_now(),
-        "outputDirectory": str(job.output_directory),
-        "jobStatus": job.status,
-        "origin": asdict(job.origin),
-        "projects": job.projects,
-        "selectedGraphIds": job.selected_graph_ids,
-        "results": [asdict(result) for result in job.results],
-    }
-    report_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    return report_path
 
 
 class BridgeSession:

@@ -24,7 +24,6 @@ from .core import (
     open_in_edge,
     probe_origin_environment,
     start_bridge_server,
-    write_export_report,
 )
 
 
@@ -157,10 +156,6 @@ class OriginBridgeApp:
             state="disabled",
         )
         self.retry_button.pack(side="left", padx=(8, 0))
-        self.log_button = ttk.Button(
-            action_row, text="查看日志", command=self._open_log, state="disabled"
-        )
-        self.log_button.pack(side="left", padx=(8, 0))
         ttk.Label(action_row, textvariable=self.status_var).pack(side="left", padx=(14, 0))
         ttk.Progressbar(container, variable=self.progress_var, maximum=100).pack(
             fill="x", pady=(6, 0)
@@ -306,15 +301,6 @@ class OriginBridgeApp:
             state=(
                 "normal"
                 if not busy and self.job and self.job.failed_results
-                else "disabled"
-            )
-        )
-        self.log_button.configure(
-            state=(
-                "normal"
-                if not busy
-                and self.job
-                and (self.job.output_directory / "export.log").is_file()
                 else "disabled"
             )
         )
@@ -505,7 +491,7 @@ class OriginBridgeApp:
         self.open_folder_button.configure(state="normal")
         if not self.graphs:
             messagebox.showwarning(
-                "没有可排版图片", "未导出符合网站限制的 PNG，请查看 export-report.json。"
+                "没有可排版图片", "未导出符合网站限制的 PNG，请查看界面中的项目状态。"
             )
 
     def _render_graphs(self) -> None:
@@ -583,7 +569,7 @@ class OriginBridgeApp:
         project_path = self.job.output_directory / "selected.figgrid"
         try:
             create_figgrid(selected, project_path, self.title_var.get())
-            write_export_report(self.job, selected)
+            self.job.selected_graph_ids = [graph.id for graph in selected]
             self._stop_bridge()
             server, session, _thread = start_bridge_server(project_path)
             self.bridge_server = server
@@ -625,13 +611,6 @@ class OriginBridgeApp:
     def _open_output(self) -> None:
         if self.job and self.job.output_directory.exists():
             os.startfile(self.job.output_directory)
-
-    def _open_log(self) -> None:
-        if not self.job:
-            return
-        log_path = self.job.output_directory / "export.log"
-        if log_path.is_file():
-            os.startfile(log_path)
 
     def _on_close(self) -> None:
         if self.exporter:

@@ -14,16 +14,7 @@ Windows 本地助手：批量打开 `.opju/.opj` 项目，将独立图页和布�
 
 导出过程中会显示每个项目的当前阶段。任务取消后可在当前窗口继续；超时、无图页或启动失败的项目可单独重试。
 
-每次运行会生成：
-
-```text
-所选输出目录/
-├─ image/
-├─ origin-logs/
-├─ export.log
-├─ selected.figgrid
-└─ export-report.json
-```
+导出的 PNG 直接保存在所选输出目录中，同名图片自动追加序号。导出目录不生成日志或报告。点击一键排版后，助手会在该目录生成 `selected.figgrid`。
 
 自动导入失败时，在 Layout Assistant 的“我的工程”页面手动导入 `selected.figgrid` 即可。
 
