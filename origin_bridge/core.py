@@ -553,6 +553,25 @@ def _copy_exported_image(source: Path, target: Path) -> Path:
         return candidate
 
 
+def _copy_exported_image(source: Path, target: Path) -> Path:
+    candidate = target
+    suffix = 2
+    while True:
+        try:
+            output = candidate.open("xb")
+        except FileExistsError:
+            candidate = target.with_name(f"{target.stem}_{suffix}{target.suffix}")
+            suffix += 1
+            continue
+        try:
+            with output, source.open("rb") as incoming:
+                shutil.copyfileobj(incoming, output)
+        except OSError:
+            candidate.unlink(missing_ok=True)
+            raise
+        return candidate
+
+
 class OriginBatchExporter:
     def __init__(
         self,
