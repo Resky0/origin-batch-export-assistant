@@ -17,8 +17,8 @@ Windows 本地助手：批量打开 `.opju/.opj` 项目，将独立图页和布�
 每次运行会生成：
 
 ```text
-OriginBatch_YYYYMMDD_HHmmss/
-├─ images/
+所选输出目录/
+├─ image/
 ├─ origin-logs/
 ├─ export.log
 ├─ selected.figgrid
