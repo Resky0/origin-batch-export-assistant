@@ -559,6 +559,25 @@ class BatchLogger:
                 handle.write(line)
 
 
+def _copy_exported_image(source: Path, target: Path) -> Path:
+    candidate = target
+    suffix = 2
+    while True:
+        try:
+            output = candidate.open("xb")
+        except FileExistsError:
+            candidate = target.with_name(f"{target.stem}_{suffix}{target.suffix}")
+            suffix += 1
+            continue
+        try:
+            with output, source.open("rb") as incoming:
+                shutil.copyfileobj(incoming, output)
+        except OSError:
+            candidate.unlink(missing_ok=True)
+            raise
+        return candidate
+
+
 class OriginBatchExporter:
     def __init__(
         self,
@@ -598,16 +617,11 @@ class OriginBatchExporter:
         normalized_projects = [Path(project).expanduser().resolve() for project in projects]
         validate_origin_projects(self.installation, normalized_projects)
 
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_directory = Path(output_root) / f"OriginBatch_{stamp}"
-        suffix = 2
-        while output_directory.exists():
-            output_directory = Path(output_root) / f"OriginBatch_{stamp}_{suffix}"
-            suffix += 1
-        images_directory = output_directory / "images"
-        images_directory.mkdir(parents=True)
+        output_directory = Path(output_root)
+        images_directory = output_directory / "image"
+        images_directory.mkdir(parents=True, exist_ok=True)
         origin_logs_directory = output_directory / "origin-logs"
-        origin_logs_directory.mkdir()
+        origin_logs_directory.mkdir(exist_ok=True)
         results = [
             ProjectExportResult(project_index=index, source_path=str(source))
             for index, source in enumerate(normalized_projects, start=1)
@@ -756,7 +770,6 @@ class OriginBatchExporter:
     ) -> None:
         root = job.images_directory.resolve()
         candidates = {Path(graph.image_path) for graph in result.graphs}
-        candidates.update(job.images_directory.glob(f"{result.project_index:04d}_*.png"))
         for candidate in candidates:
             try:
                 resolved = candidate.resolve()
@@ -931,8 +944,7 @@ class OriginBatchExporter:
                 f"{project_index:04d}_{_safe_filename(source.stem)}_"
                 f"Graph{graph_index:02d}.png"
             )
-            final_path = job.images_directory / final_name
-            shutil.copy2(exported, final_path)
+            final_path = _copy_exported_image(exported, job.images_directory / final_name)
             graph_error: str | None = None
             eligible = True
             try:
