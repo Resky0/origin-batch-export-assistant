@@ -28,6 +28,34 @@ from .core import (
 )
 
 
+_PREFERENCES_KEY = r"Software\OriginBatchExportAssistant"
+
+
+def _load_output_directory() -> Path:
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _PREFERENCES_KEY) as key:
+            value, kind = winreg.QueryValueEx(key, "OutputDirectory")
+        if kind == winreg.REG_SZ and value:
+            directory = Path(value)
+            if directory.is_absolute() and directory.is_dir():
+                return directory
+    except (ImportError, OSError, ValueError):
+        pass
+    return Path.home() / "Documents"
+
+
+def _remember_output_directory(directory: Path) -> None:
+    try:
+        import winreg
+
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PREFERENCES_KEY) as key:
+            winreg.SetValueEx(key, "OutputDirectory", 0, winreg.REG_SZ, str(directory.resolve()))
+    except (ImportError, OSError, ValueError):
+        pass
+
+
 class OriginBridgeApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -37,7 +65,7 @@ class OriginBridgeApp:
 
         discovered = discover_origin_executable()
         self.origin_var = tk.StringVar(value=str(discovered or ""))
-        self.output_var = tk.StringVar(value=str(Path.home() / "Documents"))
+        self.output_var = tk.StringVar(value=str(_load_output_directory()))
         self.site_var = tk.StringVar(value=DEFAULT_SITE_URL)
         self.title_var = tk.StringVar(value="Origin 批量排版")
         self.status_var = tk.StringVar(value="添加 Origin 项目后开始批量导出。")
@@ -233,9 +261,10 @@ class OriginBridgeApp:
             self.origin_status_var.set("Origin 路径已更改，请重新检测环境")
 
     def _choose_output(self) -> None:
-        path = filedialog.askdirectory(title="选择批量导出目录")
+        path = filedialog.askdirectory(title="选择批量导出目录", initialdir=self.output_var.get())
         if path:
             self.output_var.set(path)
+            _remember_output_directory(Path(path))
 
     def _add_files(self) -> None:
         paths = filedialog.askopenfilenames(
@@ -333,6 +362,7 @@ class OriginBridgeApp:
         except OSError as exc:
             messagebox.showerror("输出目录无效", str(exc))
             return
+        _remember_output_directory(output_root)
         self._ensure_environment(
             lambda: self._run_export_operation("export", output_root=output_root)
         )
