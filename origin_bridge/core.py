@@ -553,25 +553,6 @@ def _copy_exported_image(source: Path, target: Path) -> Path:
         return candidate
 
 
-def _copy_exported_image(source: Path, target: Path) -> Path:
-    candidate = target
-    suffix = 2
-    while True:
-        try:
-            output = candidate.open("xb")
-        except FileExistsError:
-            candidate = target.with_name(f"{target.stem}_{suffix}{target.suffix}")
-            suffix += 1
-            continue
-        try:
-            with output, source.open("rb") as incoming:
-                shutil.copyfileobj(incoming, output)
-        except OSError:
-            candidate.unlink(missing_ok=True)
-            raise
-        return candidate
-
-
 class OriginBatchExporter:
     def __init__(
         self,
@@ -611,7 +592,7 @@ class OriginBatchExporter:
         validate_origin_projects(self.installation, normalized_projects)
 
         output_directory = Path(output_root)
-        images_directory = output_directory
+        images_directory = output_directory / "image"
         images_directory.mkdir(parents=True, exist_ok=True)
         results = [
             ProjectExportResult(project_index=index, source_path=str(source))
