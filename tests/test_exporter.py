@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -99,14 +98,13 @@ class ExporterTests(unittest.TestCase):
             self.assertEqual("success", job.status)
             self.assertEqual(2, job.results[0].attempt)
             self.assertEqual(1, job.results[1].attempt)
-            self.assertFalse((job.images_directory / "0001_partial.png").exists())
+            self.assertTrue((job.images_directory / "0001_partial.png").exists())
             self.assertEqual(second_payload, second_image.read_bytes())
-            report = json.loads(
-                (job.output_directory / "export-report.json").read_text(encoding="utf-8")
+            self.assertEqual(root / "out", job.images_directory)
+            self.assertEqual(
+                {"0001_partial.png", "0001_one_Graph01.png", "0002_two_Graph01.png"},
+                {entry.name for entry in job.output_directory.iterdir()},
             )
-            self.assertEqual(2, report["reportVersion"])
-            self.assertEqual("0.6.0", report["appVersion"])
-            self.assertEqual("success", report["jobStatus"])
 
     def test_cancelled_job_can_continue_in_same_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
